@@ -79,6 +79,17 @@ The dashboard opens at `http://localhost:8501`.
 | **Export** | Interactive Report | Full Plotly HTML export |
 | | Static Report | Lightweight matplotlib PNG export |
 
+### Default Data
+
+On startup the app loads two built-in CSV files from the `data/` folder:
+
+| Dataset | Default file | Override |
+|---------|-------------|----------|
+| Equity Curve | `data/equity_curve.csv` | Upload via *Data Source → Upload Equity Curve CSV* in the sidebar |
+| Trades List | `data/trades_list.csv` | Upload via *Data Source → Upload Trades List CSV* in the sidebar |
+
+To permanently change the default dataset, replace the corresponding file in `data/`. The app will pick up the new file on the next reload. Uploaded files take priority — when a CSV is uploaded through the sidebar, it overrides the default for that session.
+
 ### CSV Format
 
 The uploader accepts multiple CSV flavours automatically:
