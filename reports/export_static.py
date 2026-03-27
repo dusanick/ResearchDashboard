@@ -67,8 +67,8 @@ def _chart_drawdown(df, live_date):
     ax.plot(df["Date"], df["drawdown"], color="red", linewidth=0.5, alpha=0.5)
     ax.plot(df["Date"], df["dd_avg_whole"], color="blue", linewidth=1, linestyle=":", label="Avg DD (Whole)")
     if "dd_upper_pct" in df.columns:
-        ax.plot(df["Date"], df["dd_upper_pct"], color="green", linewidth=1, linestyle="--", label="Upper Pct")
-        ax.plot(df["Date"], df["dd_lower_pct"], color="orange", linewidth=1, linestyle="--", label="Lower Pct")
+        ax.plot(df["Date"], df["dd_upper_pct"], color="green", linewidth=1, linestyle="--", label="Upper 5Y Pct")
+        ax.plot(df["Date"], df["dd_lower_pct"], color="orange", linewidth=1, linestyle="--", label="Lower 5Y Pct")
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(_pct_fmt1))
     _add_live_line(ax, live_date)
     _setup_axes(ax, "System Drawdown", "Drawdown %")

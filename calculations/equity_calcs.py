@@ -1,18 +1,79 @@
+import re
+
 import numpy as np
 import pandas as pd
 
 
 EQUITY_REQUIRED_COLS = ["Date", "System Equity Curve"]
 
+# Characters to strip from numeric values (currency symbols, whitespace)
+_CURRENCY_RE = re.compile(r"[^\d.\-eE+]")
+
+
+def _read_csv_flexible(path):
+    """Try multiple encodings to read a CSV file."""
+    for enc in ("utf-8", "cp1252", "latin-1"):
+        try:
+            if hasattr(path, "seek"):
+                path.seek(0)
+            return pd.read_csv(path, encoding=enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    if hasattr(path, "seek"):
+        path.seek(0)
+    return pd.read_csv(path, encoding="latin-1")
+
+
+def _clean_numeric(series: pd.Series) -> pd.Series:
+    """Strip currency symbols and parenthesised negatives, return float series."""
+    s = series.astype(str).str.strip()
+    # Handle parenthesised negatives: (123.45) -> -123.45
+    neg_mask = s.str.startswith("(") & s.str.endswith(")")
+    s = s.str.replace("(", "", regex=False).str.replace(")", "", regex=False)
+    s = s.apply(lambda v: _CURRENCY_RE.sub("", v))
+    result = pd.to_numeric(s, errors="coerce")
+    result[neg_mask] = -result[neg_mask].abs()
+    return result
+
+
+def _detect_equity_column(df):
+    """Find the equity value column by name or position."""
+    if "System Equity Curve" in df.columns:
+        return "System Equity Curve"
+    # Accept any column (other than Date) that contains numeric-looking values
+    non_date_cols = [c for c in df.columns if c.lower() != "date"]
+    if len(non_date_cols) == 1:
+        return non_date_cols[0]
+    # Try each non-date column; pick the first that is mostly numeric after cleaning
+    for col in non_date_cols:
+        cleaned = _clean_numeric(df[col])
+        if cleaned.notna().sum() > len(df) * 0.5:
+            return col
+    raise ValueError(
+        "Cannot detect equity column. Ensure the CSV has a 'Date' column "
+        "and one numeric equity column."
+    )
+
 
 def load_equity_curve(path):
     """Load equity curve CSV, validate required columns, and parse dates."""
-    df = pd.read_csv(path)
-    missing = [c for c in EQUITY_REQUIRED_COLS if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing required equity columns: {', '.join(missing)}")
-    df = df[EQUITY_REQUIRED_COLS].copy()
-    df = df.rename(columns={"System Equity Curve": "equity"})
+    df = _read_csv_flexible(path)
+
+    # Ensure a Date column exists (case-insensitive fallback)
+    if "Date" not in df.columns:
+        date_col = next((c for c in df.columns if c.lower() == "date"), None)
+        if date_col:
+            df = df.rename(columns={date_col: "Date"})
+        else:
+            raise ValueError("Missing required equity column: Date")
+
+    eq_col = _detect_equity_column(df)
+    df = df[["Date", eq_col]].copy()
+    df = df.rename(columns={eq_col: "equity"})
+
+    # Clean equity values (strip currency symbols etc.)
+    df["equity"] = _clean_numeric(df["equity"])
+
     # Handle mixed date formats: ISO strings + Excel serial numbers
     parsed = pd.to_datetime(df["Date"], errors="coerce")
     mask = parsed.isna()
@@ -34,13 +95,23 @@ def compute_drawdown(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# Rolling window for DD percentile bands (5 years of trading days)
+DD_PERCENTILE_WINDOW = 1260
+
+
 def compute_dd_percentile_bands(df: pd.DataFrame, percentile: int) -> pd.DataFrame:
-    """Compute expanding upper/lower drawdown percentile bands."""
-    upper_pct = percentile / 100.0
-    lower_pct = (100 - percentile) / 100.0
+    """Compute rolling upper/lower drawdown percentile bands.
+
+    Uses a 1260-day (5-year) rolling window, expanding until the window is full.
+    Labels match Excel convention:
+      dd_lower_pct = quantile(percentile/100) → deeper (more negative) drawdowns
+      dd_upper_pct = quantile((100-percentile)/100) → shallower drawdowns
+    """
+    lower_q = percentile / 100.0
+    upper_q = (100 - percentile) / 100.0
     dd = df["drawdown"]
-    df["dd_upper_pct"] = dd.expanding().quantile(upper_pct)
-    df["dd_lower_pct"] = dd.expanding().quantile(lower_pct)
+    df["dd_lower_pct"] = dd.rolling(window=DD_PERCENTILE_WINDOW, min_periods=1).quantile(lower_q)
+    df["dd_upper_pct"] = dd.rolling(window=DD_PERCENTILE_WINDOW, min_periods=1).quantile(upper_q)
     return df
 
 

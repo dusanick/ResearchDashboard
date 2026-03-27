@@ -1,17 +1,71 @@
+import re
+
 import pandas as pd
 
 TRADES_REQUIRED_COLS = ["Trade", "DateIn", "DateOut", "Bars", "PctGain"]
 
+_CURRENCY_RE = re.compile(r"[^\d.\-eE+]")
+
+
+def _read_csv_flexible(path):
+    """Try multiple encodings to read a CSV file."""
+    for enc in ("utf-8", "cp1252", "latin-1"):
+        try:
+            if hasattr(path, "seek"):
+                path.seek(0)
+            return pd.read_csv(path, encoding=enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    if hasattr(path, "seek"):
+        path.seek(0)
+    return pd.read_csv(path, encoding="latin-1")
+
+
+def _parse_pct_gain(series: pd.Series) -> pd.Series:
+    """Parse PctGain that may be decimal (0.21) or string percent (21.00%)."""
+    s = series.astype(str).str.strip()
+    # Handle parenthesised negatives: (5.28%) -> -5.28%
+    neg_mask = s.str.startswith("(") & s.str.endswith(")")
+    s = s.str.replace("(", "", regex=False).str.replace(")", "", regex=False)
+    has_pct = s.str.contains("%", na=False)
+
+    # Remove % sign, strip currency symbols
+    s_clean = s.str.replace("%", "", regex=False)
+    s_clean = s_clean.apply(lambda v: _CURRENCY_RE.sub("", v))
+    result = pd.to_numeric(s_clean, errors="coerce")
+
+    # If value was a percentage string, divide by 100
+    result[has_pct] = result[has_pct] / 100.0
+    result[neg_mask] = -result[neg_mask].abs()
+    return result
+
 
 def load_trades(path):
     """Load trades list CSV, validate required columns, and parse dates."""
-    df = pd.read_csv(path)
+    df = _read_csv_flexible(path)
+
+    # Case-insensitive column matching
+    col_map = {c.lower(): c for c in df.columns}
+    for req in TRADES_REQUIRED_COLS:
+        if req not in df.columns and req.lower() in col_map:
+            df = df.rename(columns={col_map[req.lower()]: req})
+
     missing = [c for c in TRADES_REQUIRED_COLS if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required trades columns: {', '.join(missing)}")
     df = df[TRADES_REQUIRED_COLS].copy()
-    df["DateIn"] = pd.to_datetime(df["DateIn"])
-    df["DateOut"] = pd.to_datetime(df["DateOut"])
+
+    # Parse PctGain (handles both decimal and percentage string formats)
+    df["PctGain"] = _parse_pct_gain(df["PctGain"])
+
+    # Parse Trade number (handles zero-padded strings)
+    df["Trade"] = pd.to_numeric(df["Trade"], errors="coerce").astype(int)
+
+    # Parse Bars (may have currency symbols in some exports)
+    df["Bars"] = pd.to_numeric(df["Bars"], errors="coerce")
+
+    df["DateIn"] = pd.to_datetime(df["DateIn"], errors="coerce")
+    df["DateOut"] = pd.to_datetime(df["DateOut"], errors="coerce")
     return df
 
 

@@ -56,11 +56,11 @@ def chart_drawdown(df: pd.DataFrame, live_date=None) -> go.Figure:
     ))
     fig.add_trace(go.Scatter(
         x=df["Date"], y=df["dd_upper_pct"], mode="lines",
-        name="Upper DD Percentile", line=dict(color="green", width=1, dash="dash"),
+        name="Upper 5Y DD Percentile", line=dict(color="green", width=1, dash="dash"),
     ))
     fig.add_trace(go.Scatter(
         x=df["Date"], y=df["dd_lower_pct"], mode="lines",
-        name="Lower DD Percentile", line=dict(color="orange", width=1, dash="dash"),
+        name="Lower 5Y DD Percentile", line=dict(color="orange", width=1, dash="dash"),
     ))
     _add_live_line(fig, live_date)
     fig.update_layout(**_base_layout("System Drawdown", "Drawdown %"))

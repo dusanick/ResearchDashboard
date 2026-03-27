@@ -51,9 +51,9 @@ def csv_good(tmp_path):
 
 @pytest.fixture
 def csv_missing_col(tmp_path):
-    """CSV missing the equity column."""
+    """CSV with no Date column at all."""
     p = tmp_path / "bad.csv"
-    pd.DataFrame({"Date": ["2020-01-01"], "Wrong": [100]}).to_csv(p, index=False)
+    pd.DataFrame({"NoDate": ["2020-01-01"], "Wrong": [100]}).to_csv(p, index=False)
     return str(p)
 
 
@@ -94,7 +94,7 @@ class TestLoadEquityCurve:
         assert len(df) == 10
 
     def test_rejects_missing_columns(self, csv_missing_col):
-        with pytest.raises(ValueError, match="Missing required equity columns"):
+        with pytest.raises(ValueError, match="Missing required equity column: Date"):
             load_equity_curve(csv_missing_col)
 
     def test_keeps_only_required_columns(self, csv_extra_cols):
@@ -162,8 +162,8 @@ class TestComputeDDPercentileBands:
         df = compute_drawdown(simple_equity_df)
         df = compute_dd_percentile_bands(df, 30)
         valid = df.dropna(subset=["dd_upper_pct", "dd_lower_pct"])
-        # DD values are negative; upper pct (30th) is more negative than lower (70th)
-        assert (valid["dd_upper_pct"] <= valid["dd_lower_pct"]).all()
+        # dd_lower_pct (30th percentile) is more negative than dd_upper_pct (70th)
+        assert (valid["dd_lower_pct"] <= valid["dd_upper_pct"]).all()
 
 
 # ── compute_dd_distribution ───────────────────────────────────────────────────

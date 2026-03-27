@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 
+pd.set_option("styler.render.max_elements", 500_000)
+
 from calculations.equity_calcs import load_equity_curve, compute_all as eq_compute_all
 from calculations.equity_calcs import compute_dd_distribution
 from calculations.trades_calcs import load_trades, compute_all as tr_compute_all
@@ -102,7 +104,7 @@ if eq_df is not None:
         eq_view = eq_df[(eq_df["Date"] >= start_dt) & (eq_df["Date"] <= end_dt)]
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_eq, tab_tr = st.tabs(["Equity Curve Dashboard", "Trades Dashboard"])
+tab_eq, tab_tr, tab_data = st.tabs(["Equity Curve Dashboard", "Trades Dashboard", "Data Sheet"])
 
 with tab_eq:
     if eq_df is None:
@@ -151,6 +153,124 @@ with tab_tr:
 
         st.plotly_chart(chart_rolling_win_pct(tr_view, x_col), use_container_width=True)
         st.plotly_chart(chart_rolling_gain(tr_view, x_col), use_container_width=True)
+
+with tab_data:
+    st.header("Data Sheet — Audit & Verification")
+    ds_eq, ds_tr = st.tabs(["Equity Calculations", "Trades Calculations"])
+
+    # ── Equity data sheet ─────────────────────────────────────────────────────
+    with ds_eq:
+        if eq_df is None:
+            st.warning("No equity data loaded.")
+        else:
+            src = eq_view if recalc else eq_df
+
+            # Column grouping for readability
+            _eq_groups = {
+                "Core": ["Date", "equity", "highest_high", "drawdown"],
+                "Drawdown Bands": ["dd_avg_whole", "dd_avg_252", "dd_upper_pct", "dd_lower_pct"],
+                "Rolling CAGR": ["cagr_1y", "cagr_3y", "cagr_5y", "cagr_7y", "cagr_10y"],
+                "Moving Averages": ["ma_25", "ma_50", "ma_100", "ma_200", "ma_avg"],
+                "Bollinger Bands": [
+                    "bb_std", "bb_upper", "bb_lower",
+                    "bb_std_log", "bb_upper_log", "bb_lower_log",
+                    "days_above_bb", "days_below_bb",
+                ],
+                "Volatility": ["log_return", "vol_25", "vol_50", "vol_100", "vol_200", "vol_median"],
+                "Best Fit Channel": [
+                    "best_fit", "best_fit_upper", "best_fit_lower",
+                    "above_fit", "below_fit",
+                    "above_ceiling", "below_floor",
+                    "pct_above_ceiling", "pct_below_floor",
+                ],
+            }
+
+            # Let user pick which groups to display
+            all_groups = list(_eq_groups.keys())
+            selected_groups = st.multiselect(
+                "Column Groups", all_groups, default=all_groups, key="eq_groups",
+            )
+            show_cols = []
+            for g in selected_groups:
+                show_cols.extend(c for c in _eq_groups[g] if c in src.columns)
+            # Remove duplicates while preserving order
+            show_cols = list(dict.fromkeys(show_cols))
+
+            st.caption(f"{len(src):,} rows  ·  {len(show_cols)} columns")
+
+            # Format percentages and large numbers
+            _pct = {"drawdown", "dd_avg_whole", "dd_avg_252", "dd_upper_pct", "dd_lower_pct",
+                    "cagr_1y", "cagr_3y", "cagr_5y", "cagr_7y", "cagr_10y",
+                    "log_return", "pct_above_ceiling", "pct_below_floor"}
+            _int = {"days_above_bb", "days_below_bb", "above_fit", "below_fit",
+                    "above_ceiling", "below_floor"}
+            fmt = {c: "{:.4%}" if c in _pct else "{:.0f}" if c in _int else "{:,.2f}"
+                   for c in show_cols if c != "Date"}
+
+            st.dataframe(
+                src[show_cols].style.format(fmt, na_rep=""),
+                height=600,
+                use_container_width=True,
+            )
+
+            # CSV download
+            csv_bytes = src[show_cols].to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download Equity Data as CSV",
+                csv_bytes,
+                file_name="equity_data_sheet.csv",
+                mime="text/csv",
+            )
+
+    # ── Trades data sheet ─────────────────────────────────────────────────────
+    with ds_tr:
+        if tr_df is None:
+            st.warning("No trades data loaded.")
+        else:
+            _tr_groups = {
+                "Core": ["trade_num", "DateIn", "DateOut", "bars", "pct_gain", "win"],
+                "Rolling Win %": [
+                    "win_pct_25", "win_pct_50", "win_pct_100", "win_pct_200",
+                    "win_pct_avg", "win_pct_std", "win_pct_upper", "win_pct_lower",
+                ],
+                "Rolling Avg Gain": [
+                    "gain_avg_25", "gain_avg_50", "gain_avg_100", "gain_avg_200",
+                    "gain_avg", "gain_std", "gain_upper", "gain_lower",
+                ],
+            }
+
+            all_tr_groups = list(_tr_groups.keys())
+            selected_tr = st.multiselect(
+                "Column Groups", all_tr_groups, default=all_tr_groups, key="tr_groups",
+            )
+            tr_show = []
+            for g in selected_tr:
+                tr_show.extend(c for c in _tr_groups[g] if c in tr_df.columns)
+            tr_show = list(dict.fromkeys(tr_show))
+
+            st.caption(f"{len(tr_df):,} trades  ·  {len(tr_show)} columns")
+
+            tr_pct = {"pct_gain", "win_pct_25", "win_pct_50", "win_pct_100", "win_pct_200",
+                      "win_pct_avg", "win_pct_std", "win_pct_upper", "win_pct_lower",
+                      "gain_avg_25", "gain_avg_50", "gain_avg_100", "gain_avg_200",
+                      "gain_avg", "gain_std", "gain_upper", "gain_lower"}
+            tr_int = {"trade_num", "bars", "win"}
+            tr_fmt = {c: "{:.4%}" if c in tr_pct else "{:.0f}" if c in tr_int else "{:,.2f}"
+                      for c in tr_show if c not in ("DateIn", "DateOut")}
+
+            st.dataframe(
+                tr_df[tr_show].style.format(tr_fmt, na_rep=""),
+                height=600,
+                use_container_width=True,
+            )
+
+            csv_bytes = tr_df[tr_show].to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download Trades Data as CSV",
+                csv_bytes,
+                file_name="trades_data_sheet.csv",
+                mime="text/csv",
+            )
 
 # ── Export ────────────────────────────────────────────────────────────────────
 st.sidebar.divider()
