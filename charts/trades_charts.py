@@ -32,7 +32,7 @@ def chart_rolling_win_pct(df: pd.DataFrame, x_col: str = "trade_num") -> go.Figu
 
     fig.add_trace(go.Scatter(
         x=x, y=df["win_pct_avg"], mode="lines",
-        name="Average", line=dict(color="black", width=1.5),
+        name="Average (25/50/100/200)", line=dict(color="black", width=1.5),
     ))
     fig.add_trace(go.Scatter(
         x=x, y=df["win_pct_upper"], mode="lines",
@@ -65,7 +65,7 @@ def chart_rolling_gain(df: pd.DataFrame, x_col: str = "trade_num") -> go.Figure:
 
     fig.add_trace(go.Scatter(
         x=x, y=df["gain_avg"], mode="lines",
-        name="Average", line=dict(color="black", width=1.5),
+        name="Average (25/50/100/200)", line=dict(color="black", width=1.5),
     ))
     fig.add_trace(go.Scatter(
         x=x, y=df["gain_upper"], mode="lines",

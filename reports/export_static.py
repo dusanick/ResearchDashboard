@@ -92,12 +92,12 @@ def _chart_rolling_cagr(df, live_date):
 def _chart_bollinger(df, log_y, live_date):
     fig, ax = plt.subplots(figsize=(11, 4))
     ax.plot(df["Date"], df["equity"], color="#1f77b4", linewidth=1, label="Equity Curve")
-    ax.plot(df["Date"], df["ma_avg"], color="orange", linewidth=1, label="MA Average")
+    ax.plot(df["Date"], df["ma_avg"], color="orange", linewidth=1, label="MA Average (25/50/100/200)")
     upper_col = "bb_upper_log" if log_y else "bb_upper"
     lower_col = "bb_lower_log" if log_y else "bb_lower"
     if upper_col in df.columns:
-        ax.plot(df["Date"], df[upper_col], color="green", linewidth=1, linestyle="--", label="Upper Band")
-        ax.plot(df["Date"], df[lower_col], color="red", linewidth=1, linestyle="--", label="Lower Band")
+        ax.plot(df["Date"], df[upper_col], color="green", linewidth=1, linestyle="--", label="Upper BB")
+        ax.plot(df["Date"], df[lower_col], color="red", linewidth=1, linestyle="--", label="Lower BB")
     if log_y:
         ax.set_yscale("log")
     _add_live_line(ax, live_date)
@@ -152,7 +152,7 @@ def _chart_rolling_win_pct(df, x_col):
         if col in df.columns:
             ax.plot(x, df[col], color=c, linewidth=1, label=f"Rolling {w}")
     if "win_pct_avg" in df.columns:
-        ax.plot(x, df["win_pct_avg"], color="black", linewidth=1.5, label="Average")
+        ax.plot(x, df["win_pct_avg"], color="black", linewidth=1.5, label="Average (25/50/100/200)")
     if "win_pct_upper" in df.columns:
         ax.plot(x, df["win_pct_upper"], color="green", linewidth=1, linestyle="--", label="Upper Band")
         ax.plot(x, df["win_pct_lower"], color="red", linewidth=1, linestyle="--", label="Lower Band")
@@ -169,7 +169,7 @@ def _chart_rolling_gain(df, x_col):
         if col in df.columns:
             ax.plot(x, df[col], color=c, linewidth=1, label=f"Rolling {w}")
     if "gain_avg" in df.columns:
-        ax.plot(x, df["gain_avg"], color="black", linewidth=1.5, label="Average")
+        ax.plot(x, df["gain_avg"], color="black", linewidth=1.5, label="Average (25/50/100/200)")
     if "gain_upper" in df.columns:
         ax.plot(x, df["gain_upper"], color="green", linewidth=1, linestyle="--", label="Upper Band")
         ax.plot(x, df["gain_lower"], color="red", linewidth=1, linestyle="--", label="Lower Band")

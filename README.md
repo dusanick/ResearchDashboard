@@ -169,8 +169,8 @@ Each series begins once enough history is available (NaN before that).
 | Series | Formula | Notes |
 |--------|---------|-------|
 | **Equity Curve** | Raw equity | — |
-| **MA Average** | `mean(MA25, MA50, MA100, MA200)` | Averages whichever MAs are available (`skipna=True`), so it starts at day 25 |
-| **Upper / Lower Band** | `MA Average ± n × σ` | `σ` = population std dev of MA Average over a rolling 176-day window. `n` = sidebar *Bollinger Band Std Devs* |
+| **MA Average (25/50/100/200)** | `mean(MA25, MA50, MA100, MA200)` | Pointwise average of whichever MAs are available (`skipna=True`), so it starts at day 25 with just the 25-day MA and progressively includes the 50, 100, and 200-day MAs as they become available |
+| **Upper / Lower BB** | `MA Average ± n × σ` | `σ` = population std dev of MA Average over a rolling 176-day window. `n` = sidebar *Bollinger Band Std Devs* |
 | **Log-space Bands** | `exp(log(MA Average) ± n × σ_log)` | Used when the log-scale toggle is on, for symmetric visual display |
 
 Moving averages: simple rolling means with windows of 25, 50, 100, and 200 days (`min_periods = window`).
@@ -189,7 +189,7 @@ Displayed as a stacked bar chart — green bars above zero, red bars below.
 | Series | Window | Formula |
 |--------|--------|---------|
 | 25/50/100/200-Day Vol | 25/50/100/200 | `std(log_returns, window) × √252` |
-| Long-term Median | Expanding from day 200 | `expanding median` of the 200-day vol series |
+| Long-term Median | Expanding from day 200 | Expanding median of the 200-day vol series — at each date, the median of all `vol_200` values from day 200 up to that point. Not a fixed rolling window; it grows with the data, providing a stable long-run volatility benchmark |
 
 Log returns: `ln(equity_t / equity_{t−1})`.
 
@@ -212,7 +212,7 @@ Statistics computed from historical data (≤ today): % of time above/below the 
 | Series | Formula | Notes |
 |--------|---------|-------|
 | **Rolling 25 / 50 / 100 Win %** | `rolling sum(win) / window` | `win = 1` if `PctGain > 0`, else `0`. Min periods = window |
-| **Average** | `mean(win_pct_25, win_pct_50, win_pct_100, win_pct_200)` | Requires all 4 windows to be non-NaN (`skipna=False`) |
+| **Average (25/50/100/200)** | `mean(win_pct_25, win_pct_50, win_pct_100, win_pct_200)` | Pointwise average of the four rolling win-% series. Uses `skipna=False`, so it only produces a value once all 4 windows are available (i.e., after trade 200) |
 | **Upper / Lower Band** | `Average ± n × σ` | `σ` = rolling 25-trade std dev of the Average series. `n` = sidebar *Trade Std Devs* |
 
 #### Chart 2 — Rolling Avg Gain % + Standard Deviation
@@ -220,7 +220,7 @@ Statistics computed from historical data (≤ today): % of time above/below the 
 | Series | Formula | Notes |
 |--------|---------|-------|
 | **Rolling 25 / 50 / 100 / 200 Avg Gain** | `rolling mean(PctGain, window)` | Min periods = window |
-| **Average** | `mean(gain_avg_25, …, gain_avg_200)` | Same `skipna=False` rule as Win % |
+| **Average (25/50/100/200)** | `mean(gain_avg_25, …, gain_avg_200)` | Pointwise average of the four rolling gain series. Same `skipna=False` rule — only produces a value after trade 200 |
 | **Upper / Lower Band** | `Average ± n × σ` | `σ` = rolling 25-trade std dev of the Average series |
 
 ---

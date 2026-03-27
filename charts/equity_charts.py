@@ -98,15 +98,15 @@ def chart_equity_bollinger(df: pd.DataFrame, log_y: bool = False, live_date=None
     ))
     fig.add_trace(go.Scatter(
         x=df["Date"], y=df["ma_avg"], mode="lines",
-        name="MA Average", line=dict(color="orange", width=1),
+        name="MA Average (25/50/100/200)", line=dict(color="orange", width=1),
     ))
     fig.add_trace(go.Scatter(
         x=df["Date"], y=df[upper_col], mode="lines",
-        name="Upper Band", line=dict(color="green", width=1, dash="dash"),
+        name="Upper BB", line=dict(color="green", width=1, dash="dash"),
     ))
     fig.add_trace(go.Scatter(
         x=df["Date"], y=df[lower_col], mode="lines",
-        name="Lower Band", line=dict(color="red", width=1, dash="dash"),
+        name="Lower BB", line=dict(color="red", width=1, dash="dash"),
     ))
     _add_live_line(fig, live_date)
     fig.update_layout(**_base_layout("System Equity Curve + Std Dev Bands", "Equity", log_y))
