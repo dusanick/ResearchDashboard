@@ -31,7 +31,7 @@ def _parse_pct_gain(series: pd.Series) -> pd.Series:
 
     # Remove % sign, strip currency symbols
     s_clean = s.str.replace("%", "", regex=False)
-    s_clean = s_clean.apply(lambda v: _CURRENCY_RE.sub("", v))
+    s_clean = s_clean.apply(lambda v: _CURRENCY_RE.sub("", v) if isinstance(v, str) else v)
     result = pd.to_numeric(s_clean, errors="coerce")
 
     # If value was a percentage string, divide by 100
@@ -64,8 +64,20 @@ def load_trades(path):
     # Parse Bars (may have currency symbols in some exports)
     df["Bars"] = pd.to_numeric(df["Bars"], errors="coerce")
 
-    df["DateIn"] = pd.to_datetime(df["DateIn"], errors="coerce")
-    df["DateOut"] = pd.to_datetime(df["DateOut"], errors="coerce")
+    # Robust date parsing (mixed formats + Excel serial numbers)
+    _excel_epoch = pd.Timestamp("1899-12-30")
+    for col in ("DateIn", "DateOut"):
+        parsed = pd.to_datetime(df[col].astype(str).str.strip(),
+                                format="mixed", dayfirst=False, errors="coerce")
+        mask = parsed.isna()
+        if mask.any():
+            nums = pd.to_numeric(df.loc[mask, col], errors="coerce")
+            valid = nums.notna()
+            if valid.any():
+                parsed.loc[nums[valid].index] = (
+                    _excel_epoch + pd.to_timedelta(nums[valid], unit="D")
+                )
+        df[col] = parsed
     return df
 
 

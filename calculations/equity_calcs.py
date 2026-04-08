@@ -30,7 +30,7 @@ def _clean_numeric(series: pd.Series) -> pd.Series:
     # Handle parenthesised negatives: (123.45) -> -123.45
     neg_mask = s.str.startswith("(") & s.str.endswith(")")
     s = s.str.replace("(", "", regex=False).str.replace(")", "", regex=False)
-    s = s.apply(lambda v: _CURRENCY_RE.sub("", v))
+    s = s.apply(lambda v: _CURRENCY_RE.sub("", v) if isinstance(v, str) else v)
     result = pd.to_numeric(s, errors="coerce")
     result[neg_mask] = -result[neg_mask].abs()
     return result
