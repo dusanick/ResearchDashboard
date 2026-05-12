@@ -216,12 +216,60 @@ def _ann_return_from_trades(df: pd.DataFrame) -> float:
     return df["PctGain"].mean() * tpy
 
 
+def _max_drawdown_from_profits(df: pd.DataFrame) -> float:
+    """Max drawdown from cumulative Profit (dollar-based, additive).
+
+    This avoids the compounding problem with per-position PctGain.
+    """
+    if "Profit" not in df.columns or df.empty:
+        return np.nan
+    cum_profit = df["Profit"].cumsum()
+    peak = cum_profit.cummax()
+    # Drawdown as fraction of peak equity (assuming starting equity)
+    starting_equity = 100_000  # reasonable default
+    equity = starting_equity + cum_profit
+    eq_peak = equity.cummax()
+    dd = (equity - eq_peak) / eq_peak
+    return dd.min()
+
+
 def _max_drawdown_from_returns(returns: pd.Series) -> float:
-    """Max drawdown from a series of per-trade returns."""
+    """Max drawdown from a series of per-trade returns.
+
+    WARNING: Only valid if returns are non-overlapping sequential returns.
+    For overlapping positions, use _max_drawdown_from_profits or equity curve.
+    """
     cum = (1 + returns).cumprod()
     peak = cum.cummax()
     dd = (cum - peak) / peak
     return dd.min()
+
+
+def _cagr_from_equity(equity_df: pd.DataFrame) -> float:
+    """CAGR from equity curve DataFrame."""
+    if equity_df is None or equity_df.empty:
+        return np.nan
+    start_val = equity_df["equity"].iloc[0]
+    end_val = equity_df["equity"].iloc[-1]
+    days = (equity_df["Date"].iloc[-1] - equity_df["Date"].iloc[0]).days
+    if days <= 0 or start_val <= 0:
+        return np.nan
+    years = days / 365.25
+    return (end_val / start_val) ** (1 / years) - 1
+
+
+def _cagr_from_profits(df: pd.DataFrame) -> float:
+    """CAGR approximation from cumulative Profit column."""
+    if "Profit" not in df.columns or df.empty:
+        return np.nan
+    starting_equity = 100_000
+    total_profit = df["Profit"].sum()
+    end_val = starting_equity + total_profit
+    days = (df["DateOut"].max() - df["DateIn"].min()).days
+    if days <= 0 or end_val <= 0:
+        return np.nan
+    years = days / 365.25
+    return (end_val / starting_equity) ** (1 / years) - 1
 
 
 def _sharpe_from_returns(returns: pd.Series,
@@ -259,10 +307,14 @@ def outlier_stress_test(df: pd.DataFrame, pct: float = 0.05,
         eq_peak = eq.cummax()
         max_dd_pre = ((eq - eq_peak) / eq_peak).min()
     else:
-        max_dd_pre = _max_drawdown_from_returns(df["PctGain"])
+        max_dd_pre = _max_drawdown_from_profits(df)
+
+    # CAGR: always from Profit for apples-to-apples pre/post comparison
+    cagr_pre = _cagr_from_profits(df)
 
     tpy = _trades_per_year(df)
     pre = {
+        "cagr": cagr_pre,
         "mean_return": df["PctGain"].mean(),
         "max_dd": max_dd_pre,
         "sharpe": _sharpe_from_returns(df["PctGain"], tpy),
@@ -271,8 +323,9 @@ def outlier_stress_test(df: pd.DataFrame, pct: float = 0.05,
     }
     tpy_post = _trades_per_year(df_post) if not df_post.empty else tpy
     post = {
+        "cagr": _cagr_from_profits(df_post),
         "mean_return": df_post["PctGain"].mean() if not df_post.empty else 0.0,
-        "max_dd": _max_drawdown_from_returns(df_post["PctGain"]),
+        "max_dd": _max_drawdown_from_profits(df_post),
         "sharpe": _sharpe_from_returns(df_post["PctGain"], tpy_post),
         "profit_factor": _profit_factor(df_post["PctGain"]),
         "n_trades": len(df_post),

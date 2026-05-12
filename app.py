@@ -268,17 +268,17 @@ with tab_stats:
             st.subheader("3. Fragility & Outlier Stress Test")
             stress = outlier_stress_test(stats_df, equity_df=eq_df)
             stress_table = pd.DataFrame({
-                "Metric": ["Mean Return/Trade", "Max Drawdown", "Sharpe Ratio", "Profit Factor", "N Trades"],
+                "Metric": ["CAGR", "Max Drawdown", "Sharpe Ratio", "Profit Factor", "N Trades"],
                 "Pre (Full)": [
-                    f"{stress['pre']['mean_return']:.2%}",
+                    f"{stress['pre']['cagr']:.2%}" if not np.isnan(stress['pre']['cagr']) else "N/A",
                     f"{stress['pre']['max_dd']:.2%}",
                     f"{stress['pre']['sharpe']:.2f}",
                     f"{stress['pre']['profit_factor']:.2f}",
                     f"{stress['pre']['n_trades']:,}",
                 ],
                 "Post (Top 5% Removed)": [
-                    f"{stress['post']['mean_return']:.2%}",
-                    f"{stress['post']['max_dd']:.2%}",
+                    f"{stress['post']['cagr']:.2%}" if not np.isnan(stress['post']['cagr']) else "N/A",
+                    f"{stress['post']['max_dd']:.2%}" if not np.isnan(stress['post']['max_dd']) else "N/A",
                     f"{stress['post']['sharpe']:.2f}",
                     f"{stress['post']['profit_factor']:.2f}",
                     f"{stress['post']['n_trades']:,}",
@@ -337,6 +337,19 @@ with tab_stats:
                 ],
             })
             st.dataframe(dip_table, hide_index=True)
+
+            # MAE significance callout
+            mae_dd = dip['in_drawdown']['avg_mae']
+            mae_pk = dip['at_peak']['avg_mae']
+            if not np.isnan(mae_dd) and not np.isnan(mae_pk) and mae_dd != 0 and mae_pk != 0:
+                mae_diff = mae_dd - mae_pk  # both are negative, more negative = worse
+                if mae_diff < -0.005:
+                    st.warning(f"⚠ MAE is significantly worse during drawdowns "
+                               f"({mae_dd:.2%} vs {mae_pk:.2%}). "
+                               f"Trades taken in drawdowns experience deeper adverse moves.")
+                elif abs(mae_diff) <= 0.005:
+                    st.info(f"MAE is similar in both regimes ({mae_dd:.2%} vs {mae_pk:.2%}). "
+                            f"Risk behavior appears consistent regardless of equity state.")
 
             st.plotly_chart(
                 chart_equity_drawdown_shading(
