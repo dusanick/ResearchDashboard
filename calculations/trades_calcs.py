@@ -53,9 +53,8 @@ def load_trades(path):
     missing = [c for c in TRADES_REQUIRED_COLS if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required trades columns: {', '.join(missing)}")
-    df = df[TRADES_REQUIRED_COLS].copy()
 
-    # Parse PctGain (handles both decimal and percentage string formats)
+    # Keep all original columns; only parse the required ones
     df["PctGain"] = _parse_pct_gain(df["PctGain"])
 
     # Parse Trade number (handles zero-padded strings)
