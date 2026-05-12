@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 
 pd.set_option("styler.render.max_elements", 500_000)
 
@@ -13,6 +14,15 @@ from charts.equity_charts import (
 from charts.trades_charts import chart_rolling_win_pct, chart_rolling_gain
 from reports.export_html import generate_report as generate_interactive_report
 from reports.export_static import generate_static_report
+from calculations.stats_calcs import (
+    load_trades_extended, compute_health_check, outlier_stress_test,
+    annual_returns, regime_performance, profit_concentration,
+    equity_dip_analysis, significance_decay, fragility_verdict,
+)
+from charts.stats_charts import (
+    chart_return_distribution, chart_qq_plot, chart_box_plot,
+    chart_annual_returns, chart_equity_drawdown_shading,
+)
 
 st.set_page_config(page_title="Trading System Dashboard", layout="wide")
 st.title("Trading System Performance Dashboard")
@@ -104,7 +114,7 @@ if eq_df is not None:
         eq_view = eq_df[(eq_df["Date"] >= start_dt) & (eq_df["Date"] <= end_dt)]
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_eq, tab_tr, tab_data = st.tabs(["Equity Curve Dashboard", "Trades Dashboard", "Data Sheet"])
+tab_eq, tab_tr, tab_stats, tab_data = st.tabs(["Equity Curve Dashboard", "Trades Dashboard", "Statistical Analysis", "Data Sheet"])
 
 with tab_eq:
     if eq_df is None:
@@ -153,6 +163,218 @@ with tab_tr:
 
         st.plotly_chart(chart_rolling_win_pct(tr_view, x_col), use_container_width=True)
         st.plotly_chart(chart_rolling_gain(tr_view, x_col), use_container_width=True)
+
+with tab_stats:
+    st.header("Statistical Analysis — Strategy Health Check & Fragility Test")
+    if tr_df is None:
+        st.warning("Trades data not available. Please upload a valid Trades List CSV.")
+    else:
+        # Load extended data (with Profit, MAE, MFE if available)
+        @st.cache_data
+        def get_stats_data(upload_bytes):
+            if upload_bytes is not None:
+                import io
+                return load_trades_extended(io.BytesIO(upload_bytes))
+            return load_trades_extended("data/trades_list.csv")
+
+        try:
+            stats_df = get_stats_data(tr_bytes)
+        except ValueError as e:
+            st.error(f"Cannot run statistical analysis: {e}")
+            stats_df = None
+
+        if stats_df is not None:
+            returns = stats_df["PctGain"].dropna()
+
+            # ── SCOPE 1: Statistical Health Check ─────────────────────────
+            st.subheader("1. Statistical Significance Tests")
+            hc = compute_health_check(returns)
+
+            # Summary table
+            summary_data = {
+                "Metric": ["N Trades", "Win Rate", "Mean Return", "Median Return",
+                           "Profit Factor", "Skewness", "Kurtosis", "SEM"],
+                "Value": [
+                    f"{hc['n_trades']:,}",
+                    f"{hc['win_rate']:.2%}",
+                    f"{hc['mean_return']:.4%}",
+                    f"{hc['median_return']:.4%}",
+                    f"{hc['profit_factor']:.2f}",
+                    f"{hc['skewness']:.4f}",
+                    f"{hc['kurtosis']:.4f}",
+                    f"{hc['sem']:.6f}",
+                ],
+            }
+            col_s1, col_s2 = st.columns(2)
+            with col_s1:
+                st.caption("Core Metrics")
+                st.dataframe(pd.DataFrame(summary_data), hide_index=True)
+
+            # P-value dashboard
+            pval_data = {
+                "Test": ["T-test (H₀: μ=0)", "Wilcoxon Signed-Rank",
+                         "Binomial (H₀: WR=50%)", "Jarque-Bera (Normality)",
+                         "Runs Test (Independence)"],
+                "Statistic": [
+                    f"{hc['t_stat']:.4f}",
+                    f"{hc.get('wilcoxon_stat', 'N/A')}",
+                    "—",
+                    f"{hc['jb_stat']:.2f}",
+                    f"{hc['runs']}",
+                ],
+                "p-value": [
+                    f"{hc['t_pval']:.6f}",
+                    f"{hc['wilcoxon_pval']:.6f}" if not np.isnan(hc.get('wilcoxon_pval', np.nan)) else "N/A",
+                    f"{hc['binom_pval']:.6f}",
+                    f"{hc['jb_pval']:.6f}",
+                    f"{hc['runs_pval']:.6f}" if not np.isnan(hc.get('runs_pval', np.nan)) else "N/A",
+                ],
+                "Significant (p<0.05)": [
+                    "✓" if hc['t_pval'] < 0.05 else "✗",
+                    "✓" if hc.get('wilcoxon_pval', 1) < 0.05 else "✗",
+                    "✓" if hc['binom_pval'] < 0.05 else "✗",
+                    "✓" if hc['jb_pval'] < 0.05 else "✗",
+                    "✓" if hc.get('runs_pval', 1) < 0.05 else "✗",
+                ],
+            }
+            with col_s2:
+                st.caption("P-Value Dashboard")
+                st.dataframe(pd.DataFrame(pval_data), hide_index=True)
+
+            # Autocorrelation & Bootstrap
+            col_a1, col_a2 = st.columns(2)
+            with col_a1:
+                st.caption("Autocorrelation")
+                acf_data = {"Lag": [1, 2, 5],
+                            "ACF": [f"{hc.get(f'acf_lag{l}', 0):.4f}" for l in [1, 2, 5]]}
+                st.dataframe(pd.DataFrame(acf_data), hide_index=True)
+            with col_a2:
+                st.caption("Bootstrap 95% CI for Mean Return")
+                st.metric("Mean (Bootstrap)", f"{hc['bootstrap_mean']:.4%}")
+                st.metric("95% CI", f"[{hc['ci_lower']:.4%}, {hc['ci_upper']:.4%}]")
+
+            # Distribution charts
+            st.subheader("2. Fat-Tail & Distribution Analysis")
+            mean_vs = hc['mean_return'] - hc['median_return']
+            if abs(mean_vs) > 0.001:
+                st.info(f"Mean–Median gap: {mean_vs:.4%}. "
+                        f"{'Positive skew suggests the strategy benefits from large outlier wins.' if mean_vs > 0 else 'Negative skew suggests vulnerability to large losses.'}")
+
+            st.plotly_chart(chart_return_distribution(returns, hc['mean_return'], hc['median_return']),
+                           use_container_width=True)
+            st.plotly_chart(chart_qq_plot(returns), use_container_width=True)
+
+            # ── SCOPE 2: Fragility & Robustness ──────────────────────────
+            st.subheader("3. Fragility & Outlier Stress Test")
+            stress = outlier_stress_test(stats_df, equity_df=eq_df)
+            stress_table = pd.DataFrame({
+                "Metric": ["Mean Return/Trade", "Max Drawdown", "Sharpe Ratio", "Profit Factor", "N Trades"],
+                "Pre (Full)": [
+                    f"{stress['pre']['mean_return']:.2%}",
+                    f"{stress['pre']['max_dd']:.2%}",
+                    f"{stress['pre']['sharpe']:.2f}",
+                    f"{stress['pre']['profit_factor']:.2f}",
+                    f"{stress['pre']['n_trades']:,}",
+                ],
+                "Post (Top 5% Removed)": [
+                    f"{stress['post']['mean_return']:.2%}",
+                    f"{stress['post']['max_dd']:.2%}",
+                    f"{stress['post']['sharpe']:.2f}",
+                    f"{stress['post']['profit_factor']:.2f}",
+                    f"{stress['post']['n_trades']:,}",
+                ],
+            })
+            st.dataframe(stress_table, hide_index=True)
+            st.caption(f"Removed {stress['removed']} trades above threshold")
+
+            profit_col = "Profit" if "Profit" in stats_df.columns else "PctGain"
+            st.plotly_chart(chart_box_plot(stats_df[profit_col], profit_col),
+                           use_container_width=True)
+
+            # Temporal analysis
+            st.subheader("4. Temporal Bias & Regime Analysis")
+            yr = annual_returns(stats_df, equity_df=eq_df)
+            st.plotly_chart(chart_annual_returns(yr), use_container_width=True)
+
+            conc = profit_concentration(yr)
+            if conc["best_year"]:
+                st.metric("Best Year Profit Contribution",
+                          f"{conc['contribution_pct']:.1%}",
+                          delta=f"Year {conc['best_year']}")
+
+            regime = regime_performance(stats_df, equity_df=eq_df)
+            if not regime.empty and regime["n_trades"].sum() > 0:
+                st.caption("Regime Performance")
+                regime_fmt = regime.copy()
+                regime_fmt["net_return"] = regime_fmt["net_return"].apply(
+                    lambda x: f"{x:.2%}" if not pd.isna(x) else "N/A")
+                regime_fmt["win_rate"] = regime_fmt["win_rate"].apply(
+                    lambda x: f"{x:.1%}" if not pd.isna(x) else "N/A")
+                regime_fmt["profit_factor"] = regime_fmt["profit_factor"].apply(
+                    lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                st.dataframe(regime_fmt, hide_index=True)
+            else:
+                st.info("No trades found in predefined crisis periods.")
+
+            # Equity dip analysis
+            st.subheader("5. Equity Dip & Recovery Analysis")
+            dip = equity_dip_analysis(stats_df, equity_df=eq_df)
+            dip_table = pd.DataFrame({
+                "Metric": ["N Trades", "Win Rate", "Avg Profit", "Profit Factor", "Avg MAE"],
+                "In Drawdown": [
+                    f"{dip['in_drawdown']['n']:,}",
+                    f"{dip['in_drawdown']['win_rate']:.1%}" if not np.isnan(dip['in_drawdown']['win_rate']) else "N/A",
+                    f"{dip['in_drawdown']['avg_profit']:.4%}" if not np.isnan(dip['in_drawdown']['avg_profit']) else "N/A",
+                    f"{dip['in_drawdown']['profit_factor']:.2f}" if not np.isnan(dip['in_drawdown']['profit_factor']) else "N/A",
+                    f"{dip['in_drawdown']['avg_mae']:.4%}" if not np.isnan(dip['in_drawdown']['avg_mae']) else "N/A",
+                ],
+                "At Equity Peak": [
+                    f"{dip['at_peak']['n']:,}",
+                    f"{dip['at_peak']['win_rate']:.1%}" if not np.isnan(dip['at_peak']['win_rate']) else "N/A",
+                    f"{dip['at_peak']['avg_profit']:.4%}" if not np.isnan(dip['at_peak']['avg_profit']) else "N/A",
+                    f"{dip['at_peak']['profit_factor']:.2f}" if not np.isnan(dip['at_peak']['profit_factor']) else "N/A",
+                    f"{dip['at_peak']['avg_mae']:.4%}" if not np.isnan(dip['at_peak']['avg_mae']) else "N/A",
+                ],
+            })
+            st.dataframe(dip_table, hide_index=True)
+
+            st.plotly_chart(
+                chart_equity_drawdown_shading(
+                    dip["cum_equity"], dip["peak_equity"],
+                    dip["in_dd_mask"], dip["chart_dates"],
+                ),
+                use_container_width=True,
+            )
+
+            # Significance decay
+            st.subheader("6. Statistical Significance Decay")
+            sig = significance_decay(returns)
+            sig_table = pd.DataFrame({
+                "Metric": ["T-Statistic", "P-Value", "Significant (p<0.05)"],
+                "Full Sample": [
+                    f"{sig['pre_t']:.4f}",
+                    f"{sig['pre_p']:.6f}",
+                    "✓" if sig['significant_pre'] else "✗",
+                ],
+                "Top 5% Removed": [
+                    f"{sig['post_t']:.4f}",
+                    f"{sig['post_p']:.6f}",
+                    "✓" if sig['significant_post'] else "✗",
+                ],
+            })
+            st.dataframe(sig_table, hide_index=True)
+            if sig['significant_pre'] and not sig['significant_post']:
+                st.warning("⚠ Strategy loses statistical significance when top 5% outliers are removed.")
+            elif sig['significant_pre'] and sig['significant_post']:
+                st.success("Strategy edge remains significant even after removing top outliers.")
+
+            # Final verdict
+            st.subheader("7. Fragility Verdict")
+            verdict, detail = fragility_verdict(stress, sig, dip, conc)
+            if verdict == "FRAGILE":
+                st.error(f"🔴 **{verdict}** — {detail}")
+            else:
+                st.success(f"🟢 **{verdict}** — {detail}")
 
 with tab_data:
     st.header("Data Sheet — Audit & Verification")
@@ -227,8 +449,18 @@ with tab_data:
         if tr_df is None:
             st.warning("No trades data loaded.")
         else:
+            # Split columns into original CSV columns vs computed columns
+            _computed_cols = {
+                "trade_num", "pct_gain", "bars", "win",
+                "win_pct_25", "win_pct_50", "win_pct_100", "win_pct_200",
+                "win_pct_avg", "win_pct_std", "win_pct_upper", "win_pct_lower",
+                "gain_avg_25", "gain_avg_50", "gain_avg_100", "gain_avg_200",
+                "gain_avg", "gain_std", "gain_upper", "gain_lower",
+            }
+            original_cols = [c for c in tr_df.columns if c not in _computed_cols]
+
             _tr_groups = {
-                "Core": ["trade_num", "DateIn", "DateOut", "bars", "pct_gain", "win"],
+                "All Columns": original_cols,
                 "Rolling Win %": [
                     "win_pct_25", "win_pct_50", "win_pct_100", "win_pct_200",
                     "win_pct_avg", "win_pct_std", "win_pct_upper", "win_pct_lower",
@@ -250,13 +482,20 @@ with tab_data:
 
             st.caption(f"{len(tr_df):,} trades  ·  {len(tr_show)} columns")
 
-            tr_pct = {"pct_gain", "win_pct_25", "win_pct_50", "win_pct_100", "win_pct_200",
+            tr_pct = {"pct_gain", "PctGain", "PctMFE", "PctMAE", "Fraction",
+                      "CommsInPct", "CommsOutPct", "SlipInPct", "SlipOutPct",
+                      "VolumePct_In", "VolumePct_Out",
+                      "win_pct_25", "win_pct_50", "win_pct_100", "win_pct_200",
                       "win_pct_avg", "win_pct_std", "win_pct_upper", "win_pct_lower",
                       "gain_avg_25", "gain_avg_50", "gain_avg_100", "gain_avg_200",
                       "gain_avg", "gain_std", "gain_upper", "gain_lower"}
-            tr_int = {"trade_num", "bars", "win"}
+            tr_int = {"trade_num", "Trade", "bars", "Bars", "win", "QtyIn", "QtyOut"}
+            _date_cols = {"DateIn", "DateOut"}
+            _str_cols = {"Strategy", "Symbol", "Side", "Reason", "TimeIn", "TimeOut",
+                         "SavedCalcIn", "SavedCalcOut"}
+            _skip_fmt = _date_cols | _str_cols
             tr_fmt = {c: "{:.4%}" if c in tr_pct else "{:.0f}" if c in tr_int else "{:,.2f}"
-                      for c in tr_show if c not in ("DateIn", "DateOut")}
+                      for c in tr_show if c not in _skip_fmt}
 
             st.dataframe(
                 tr_df[tr_show].style.format(tr_fmt, na_rep=""),

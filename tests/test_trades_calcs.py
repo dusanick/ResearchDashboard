@@ -81,10 +81,12 @@ class TestLoadTrades:
         with pytest.raises(ValueError, match="Missing required trades columns"):
             load_trades(csv_missing_col)
 
-    def test_keeps_only_required_columns(self, csv_extra_cols):
+    def test_keeps_extra_columns(self, csv_extra_cols):
         df = load_trades(csv_extra_cols)
-        assert "Profit" not in df.columns
-        assert "Symbol" not in df.columns
+        assert "Profit" in df.columns
+        assert "Symbol" in df.columns
+        for col in TRADES_REQUIRED_COLS:
+            assert col in df.columns
 
     def test_dates_are_datetime(self, csv_good):
         df = load_trades(csv_good)
